@@ -247,8 +247,8 @@ func (p *Provider) AppendRecord(ctx context.Context, zone string, record libdns.
 		return nil, fmt.Errorf("error encoding JSON: %w", err)
 	}
 
-	// Respect KAS flood delay between API calls
-	time.Sleep(1100 * time.Millisecond)
+	// Respect KAS flood delay dynamically
+	p.waitForFloodDelay()
 
 	// Call the SOAP method with JSON-encoded params
 	res, err := soap.Call("KasApi", gosoap.Params{
@@ -299,9 +299,8 @@ func (p *Provider) AppendRecord(ctx context.Context, zone string, record libdns.
 		key, _ := keyMap["#text"].(string)
 		if key == "Response" {
 			val, _ := mitem["value"].(map[string]interface{})
-			if errorMsg, exists := val["KasFloodDelay"]; exists {
-				return nil, fmt.Errorf("API flood delay: %v", errorMsg)
-			}
+			// Update flood delay from response
+			p.updateFloodDelay(itemList)
 			// Extract the new record ID from ReturnInfo
 			if recordID, exists := val["ReturnInfo"]; exists {
 				if idStr, ok := recordID.(string); ok {
@@ -384,6 +383,8 @@ func (p *Provider) SetRecord(ctx context.Context, zone string, record libdns.Rec
 		return nil, fmt.Errorf("error encoding JSON: %w", err)
 	}
 
+	p.waitForFloodDelay()
+
 	// Call the SOAP method with JSON-encoded params
 	res, err := soap.Call("KasApi", gosoap.Params{
 		"Params": string(jsonData),
@@ -429,10 +430,7 @@ func (p *Provider) SetRecord(ctx context.Context, zone string, record libdns.Rec
 		keyMap, _ := mitem["key"].(map[string]interface{})
 		key, _ := keyMap["#text"].(string)
 		if key == "Response" {
-			val, _ := mitem["value"].(map[string]interface{})
-			if errorMsg, exists := val["KasFloodDelay"]; exists {
-				return nil, fmt.Errorf("API flood delay: %v", errorMsg)
-			}
+			p.updateFloodDelay(itemList)
 		}
 	}
 
@@ -479,6 +477,8 @@ func (p *Provider) DeleteRecord(ctx context.Context, zone string, record libdns.
 		return nil, fmt.Errorf("error encoding JSON: %w", err)
 	}
 
+	p.waitForFloodDelay()
+
 	// Call the SOAP method with JSON-encoded params
 	res, err := soap.Call("KasApi", gosoap.Params{
 		"Params": string(jsonData),
@@ -522,10 +522,7 @@ func (p *Provider) DeleteRecord(ctx context.Context, zone string, record libdns.
 		keyMap, _ := mitem["key"].(map[string]interface{})
 		key, _ := keyMap["#text"].(string)
 		if key == "Response" {
-			val, _ := mitem["value"].(map[string]interface{})
-			if errorMsg, exists := val["KasFloodDelay"]; exists {
-				return nil, fmt.Errorf("API flood delay: %v", errorMsg)
-			}
+			p.updateFloodDelay(itemList)
 		}
 	}
 	// If we reach here, the record was successfully deleted

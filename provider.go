@@ -62,6 +62,7 @@ func (p *Provider) updateFloodDelay(itemList []interface{}) {
 		}
 	}
 }
+
 // GetRecords lists all the records in the zone.
 func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record, error) {
 	libdnsRecords, err := p.GetAllRecords(ctx, zone)
