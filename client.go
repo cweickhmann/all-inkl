@@ -215,20 +215,21 @@ func (p *Provider) AppendRecord(ctx context.Context, zone string, record libdns.
 	if rr.TTL/time.Second < 600 {
 		rr.TTL = 600 * time.Second
 	}
-	ttlInSeconds := int(rr.TTL / time.Second)
+
+	// record_aux is for MX priority only — use 0 for all other record types
+	aux := 0
+	if rr.Type == "MX" {
+		aux = int(rr.TTL / time.Second)
+	}
 
 	// Prepare parameters like PHP script
 	params := map[string]interface{}{
 		"record_name": rr.Name,
 		"record_type": rr.Type,
 		"record_data": rr.Data,
-		"record_aux":  ttlInSeconds,
+		"record_aux":  aux,
+		"record_ttl":  int(rr.TTL.Seconds()),
 		"zone_host":   strings.TrimSuffix(zone, ".") + ".",
-	}
-
-	// Include TTL if specified
-	if rr.TTL != 0 {
-		params["record_ttl"] = int(rr.TTL.Seconds())
 	}
 
 	requestData := map[string]interface{}{
@@ -244,6 +245,9 @@ func (p *Provider) AppendRecord(ctx context.Context, zone string, record libdns.
 		return nil, fmt.Errorf("error encoding JSON: %w", err)
 	}
 
+	// Respect KAS flood delay between API calls
+	time.Sleep(1100 * time.Millisecond)
+
 	// Call the SOAP method with JSON-encoded params
 	res, err := soap.Call("KasApi", gosoap.Params{
 		"Params": string(jsonData),
@@ -258,6 +262,12 @@ func (p *Provider) AppendRecord(ctx context.Context, zone string, record libdns.
 	mv, err := mxj.NewMapXml([]byte(res.Body))
 	if err != nil {
 		return nil, fmt.Errorf("error converting XML to map: %w", err)
+	}
+
+	// Check for SOAP Fault (e.g. record_already_exists, auth errors, flood errors)
+	if fault, ok := mv["Fault"].(map[string]interface{}); ok {
+		faultStr, _ := fault["faultstring"].(string)
+		return nil, fmt.Errorf("KAS API error: %s", faultStr)
 	}
 
 	// Parse response to check for success and get record ID
@@ -289,6 +299,20 @@ func (p *Provider) AppendRecord(ctx context.Context, zone string, record libdns.
 			val, _ := mitem["value"].(map[string]interface{})
 			if errorMsg, exists := val["KasFloodDelay"]; exists {
 				return nil, fmt.Errorf("API flood delay: %v", errorMsg)
+			}
+			// Extract the new record ID from ReturnInfo
+			if recordID, exists := val["ReturnInfo"]; exists {
+				if idStr, ok := recordID.(string); ok {
+					rr := record.RR()
+					ChachedRecords[zone] = append(ChachedRecords[zone], allinklRecord{
+						ID:     idStr,
+						Name:   rr.Name,
+						Type:   rr.Type,
+						Value:  rr.Data,
+						ZoneID: strings.TrimSuffix(zone, "."),
+						TTL:    int(rr.TTL.Seconds()),
+					})
+				}
 			}
 		}
 	}
@@ -372,6 +396,11 @@ func (p *Provider) SetRecord(ctx context.Context, zone string, record libdns.Rec
 	mv, err := mxj.NewMapXml([]byte(res.Body))
 	if err != nil {
 		return nil, fmt.Errorf("error converting XML to map: %w", err)
+	}
+	// Check for SOAP Fault
+	if fault, ok := mv["Fault"].(map[string]interface{}); ok {
+		faultStr, _ := fault["faultstring"].(string)
+		return nil, fmt.Errorf("KAS API error: %s", faultStr)
 	}
 	// Parse response to check for success
 	root, ok := mv["KasApiResponse"].(map[string]interface{})
@@ -462,6 +491,11 @@ func (p *Provider) DeleteRecord(ctx context.Context, zone string, record libdns.
 	mv, err := mxj.NewMapXml([]byte(res.Body))
 	if err != nil {
 		return nil, fmt.Errorf("error converting XML to map: %w", err)
+	}
+	// Check for SOAP Fault
+	if fault, ok := mv["Fault"].(map[string]interface{}); ok {
+		faultStr, _ := fault["faultstring"].(string)
+		return nil, fmt.Errorf("KAS API error: %s", faultStr)
 	}
 	// Parse response to check for success
 	root, ok := mv["KasApiResponse"].(map[string]interface{})
