@@ -5,6 +5,8 @@ package allinkl
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/libdns/libdns"
 )
@@ -13,8 +15,53 @@ import (
 type Provider struct {
 	KasUsername string `json:"kas_username,omitempty"`
 	KasPassword string `json:"kas_password,omitempty"`
+
+	// mu serializes API calls to respect KAS flood delay
+	mu         sync.Mutex
+	lastCall   time.Time
+	floodDelay time.Duration
 }
 
+// waitForFloodDelay blocks until it is safe to make the next KAS API call,
+// then records the current time. Must be called before every SOAP request.
+func (p *Provider) waitForFloodDelay() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// Default to 1.5s if no flood delay has been received from the API yet
+	delay := p.floodDelay
+	if delay == 0 {
+		delay = 1500 * time.Millisecond
+	}
+	if !p.lastCall.IsZero() {
+		elapsed := time.Since(p.lastCall)
+		if elapsed < delay {
+			time.Sleep(delay - elapsed)
+		}
+	}
+	p.lastCall = time.Now()
+}
+
+// updateFloodDelay reads the KasFloodDelay value from a parsed API response
+// map and updates the provider's flood delay with a small safety buffer.
+func (p *Provider) updateFloodDelay(itemList []interface{}) {
+	for _, item := range itemList {
+		mitem, _ := item.(map[string]interface{})
+		keyMap, _ := mitem["key"].(map[string]interface{})
+		key, _ := keyMap["#text"].(string)
+		if key == "Response" {
+			val, _ := mitem["value"].(map[string]interface{})
+			if fd, exists := val["KasFloodDelay"]; exists {
+				switch v := fd.(type) {
+				case float64:
+					p.mu.Lock()
+					p.floodDelay = time.Duration(v*1000+200) * time.Millisecond
+					p.mu.Unlock()
+				}
+			}
+			return
+		}
+	}
+}
 // GetRecords lists all the records in the zone.
 func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record, error) {
 	libdnsRecords, err := p.GetAllRecords(ctx, zone)

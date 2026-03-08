@@ -53,6 +53,8 @@ func (p *Provider) GetAllRecords(ctx context.Context, zone string) ([]libdns.Rec
 		log.Fatalf("Error encoding JSON: %v", err)
 	}
 
+	p.waitForFloodDelay()
+
 	// Call the SOAP method with JSON-encoded params
 	res, err := soap.Call("KasApi", gosoap.Params{
 		"Params": string(jsonData),
