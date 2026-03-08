@@ -1,0 +1,37 @@
+name: Bump caddy-dns/all-inkl on release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caddy-dns/all-inkl
+        uses: actions/checkout@v4
+        with:
+          repository: caddy-dns/all-inkl
+          token: ${{ secrets.CADDY_DNS_PAT }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Bump libdns/all-inkl version
+        run: |
+          go get github.com/libdns/all-inkl@${{ github.event.release.tag_name }}
+          go mod tidy
+
+      - name: Open PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.CADDY_DNS_PAT }}
+          commit-message: "fix: bump libdns/all-inkl to ${{ github.event.release.tag_name }}"
+          branch: "bump/libdns-allinkl-${{ github.event.release.tag_name }}"
+          title: "fix: bump libdns/all-inkl to ${{ github.event.release.tag_name }}"
+          body: |
+            Automated bump from libdns/all-inkl release ${{ github.event.release.tag_name }}.
+            Release notes: ${{ github.event.release.html_url }}
+          base: main
