@@ -11,55 +11,78 @@ import (
 	"github.com/libdns/libdns"
 )
 
+// globalMu serializes all KAS API calls across all Provider instances.
+// KAS flood protection is per-account, so a single global gate is correct.
+var (
+	globalMu         sync.Mutex
+	globalLastCall   time.Time
+	globalFloodDelay time.Duration
+)
+
 // Provider facilitates DNS record manipulation with all-ink.com.
 type Provider struct {
 	KasUsername string `json:"kas_username,omitempty"`
 	KasPassword string `json:"kas_password,omitempty"`
-
-	// mu serializes API calls to respect KAS flood delay
-	mu         sync.Mutex
-	lastCall   time.Time
-	floodDelay time.Duration
 }
 
 // waitForFloodDelay blocks until it is safe to make the next KAS API call,
 // then records the current time. Must be called before every SOAP request.
 func (p *Provider) waitForFloodDelay() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	// Default to 1.5s if no flood delay has been received from the API yet
-	delay := p.floodDelay
+	globalMu.Lock()
+	defer globalMu.Unlock()
+	// Default to 2.5s if no flood delay has been received from the API yet
+	delay := globalFloodDelay
 	if delay == 0 {
-		delay = 1500 * time.Millisecond
+		delay = 2500 * time.Millisecond
 	}
-	if !p.lastCall.IsZero() {
-		elapsed := time.Since(p.lastCall)
+	if !globalLastCall.IsZero() {
+		elapsed := time.Since(globalLastCall)
 		if elapsed < delay {
 			time.Sleep(delay - elapsed)
 		}
 	}
-	p.lastCall = time.Now()
+	globalLastCall = time.Now()
 }
 
 // updateFloodDelay reads the KasFloodDelay value from a parsed API response
-// map and updates the provider's flood delay with a small safety buffer.
+// map and updates the global flood delay with a small safety buffer.
+// KasFloodDelay is nested inside the "Response" item's value map.
 func (p *Provider) updateFloodDelay(itemList []interface{}) {
 	for _, item := range itemList {
 		mitem, _ := item.(map[string]interface{})
 		keyMap, _ := mitem["key"].(map[string]interface{})
 		key, _ := keyMap["#text"].(string)
-		if key == "Response" {
-			val, _ := mitem["value"].(map[string]interface{})
-			if fd, exists := val["KasFloodDelay"]; exists {
-				switch v := fd.(type) {
-				case float64:
-					p.mu.Lock()
-					p.floodDelay = time.Duration(v*1000+200) * time.Millisecond
-					p.mu.Unlock()
-				}
-			}
-			return
+		if key != "Response" {
+			continue
 		}
+		// Response value is itself a map with nested items
+		val, _ := mitem["value"].(map[string]interface{})
+		innerItems := val["item"]
+		var innerList []interface{}
+		switch v := innerItems.(type) {
+		case []interface{}:
+			innerList = v
+		case map[string]interface{}:
+			innerList = []interface{}{v}
+		}
+		for _, inner := range innerList {
+			imap, _ := inner.(map[string]interface{})
+			ikey, _ := imap["key"].(map[string]interface{})
+			iname, _ := ikey["#text"].(string)
+			if iname == "KasFloodDelay" {
+				ival, _ := imap["value"].(map[string]interface{})
+				switch v := ival["#text"].(type) {
+				case float64:
+					globalMu.Lock()
+					globalFloodDelay = time.Duration(v*1000+200) * time.Millisecond
+					globalMu.Unlock()
+				case string:
+					// ignore string representation
+				}
+				return
+			}
+		}
+		return
 	}
 }
 
