@@ -234,6 +234,7 @@ func (p *Provider) AppendRecord(ctx context.Context, zone string, record libdns.
 		"record_ttl":  int(rr.TTL.Seconds()),
 		"zone_host":   strings.TrimSuffix(zone, ".") + ".",
 	}
+	log.Printf("zone -> zone_host: '%s' -> '%s'", zone, params["zone_host"])
 
 	requestData := map[string]interface{}{
 		"kas_login":        p.KasUsername,
