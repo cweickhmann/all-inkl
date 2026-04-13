@@ -38,7 +38,7 @@ func (p *Provider) GetAllRecords(ctx context.Context, zone string) ([]libdns.Rec
 	params := map[string]interface{}{
 		"zone_host": strings.TrimSuffix(zone, ".") + ".",
 	}
-	fmt.Println("zone -> zone_host: '%s' -> '%s'", zone, params["zone_host"])
+	log.Printf("zone -> zone_host: '%s' -> '%s'", zone, params["zone_host"])
 
 	requestData := map[string]interface{}{
 		"kas_login":        p.KasUsername,
