@@ -1,4 +1,4 @@
-module github.com/libdns/all-inkl
+module github.com/cweickhmann/all-inkl
 
 go 1.18
 
